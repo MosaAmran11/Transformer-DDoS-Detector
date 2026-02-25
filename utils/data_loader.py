@@ -2,7 +2,7 @@
 data_loader.py
 --------------
 Utilities to load and merge CSV datasets from the CIC-DDoS2019
-and CIC-IDS2017 directories into a single unified DataFrame.
+and CIC-IDS2018 directories into a single unified DataFrame.
 """
 
 import os
@@ -89,21 +89,22 @@ def load_dataset(
             f"→ {combined.shape[0]:,} rows × {combined.shape[1]} cols"
         )
         if label_col in combined.columns:
-            print(f"[data_loader] Class distribution:\n{combined[label_col].value_counts().to_string()}\n")
+            print(
+                f"[data_loader] Class distribution:\n{combined[label_col].value_counts().to_string()}\n")
 
     return combined
 
 
 def load_all_datasets(
     ddos2019_dir: str,
-    ids2017_dir: str,
+    ids2018_dir: str,
     label_col: str = _LABEL_COL,
     drop_cols: Optional[list] = None,
     sample_frac: Optional[float] = None,
     random_state: int = 42,
     verbose: bool = True,
 ) -> pd.DataFrame:
-    """Load both CIC-DDoS2019 and CIC-IDS2017 datasets and combine them.
+    """Load both CIC-DDoS2019 and CIC-IDS2018 datasets and combine them.
 
     If a directory is empty or missing, it is skipped silently.
 
@@ -111,8 +112,8 @@ def load_all_datasets(
     ----------
     ddos2019_dir : str
         Path to the CIC-DDoS2019 CSV directory.
-    ids2017_dir : str
-        Path to the CIC-IDS2017 CSV directory.
+    ids2018_dir : str
+        Path to the CIC-IDS2018 CSV directory.
     label_col : str
         Name of the target label column (must be present in both datasets).
     drop_cols : list, optional
@@ -131,7 +132,7 @@ def load_all_datasets(
     """
     frames = []
 
-    for directory in [ddos2019_dir, ids2017_dir]:
+    for directory in [ddos2019_dir, ids2018_dir]:
         df = load_dataset(
             directory,
             label_col=label_col,
@@ -144,7 +145,8 @@ def load_all_datasets(
             frames.append(df)
 
     if not frames:
-        raise ValueError("No data could be loaded from any of the specified directories.")
+        raise ValueError(
+            "No data could be loaded from any of the specified directories.")
 
     combined = pd.concat(frames, ignore_index=True)
 
@@ -153,6 +155,7 @@ def load_all_datasets(
             f"\n[data_loader] Combined dataset: {combined.shape[0]:,} rows × {combined.shape[1]} cols"
         )
         if label_col in combined.columns:
-            print(f"[data_loader] Overall class distribution:\n{combined[label_col].value_counts().to_string()}\n")
+            print(
+                f"[data_loader] Overall class distribution:\n{combined[label_col].value_counts().to_string()}\n")
 
     return combined
