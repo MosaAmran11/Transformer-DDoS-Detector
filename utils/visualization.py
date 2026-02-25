@@ -348,8 +348,8 @@ def plot_evaluation_metrics(
         This matches the output of
         ``sklearn.metrics.classification_report(output_dict=True)``.
     """
-    # Extract per-class metrics (skip aggregated rows)
-    skip_keys = {"accuracy", "macro avg", "weighted avg"}
+    # Extract per-class metrics (skip aggregated rows and the CM array)
+    skip_keys = {"accuracy", "macro avg", "weighted avg", "confusion_matrix"}
     class_names, precisions, recalls, f1s = [], [], [], []
 
     for cls, vals in metrics.items():
@@ -413,7 +413,7 @@ def plot_metrics_radar(
     metrics : dict
         Same format as ``plot_evaluation_metrics``.
     """
-    skip_keys = {"accuracy", "macro avg", "weighted avg"}
+    skip_keys = {"accuracy", "macro avg", "weighted avg", "confusion_matrix"}
     class_names, precisions, recalls, f1s = [], [], [], []
 
     for cls, vals in metrics.items():
