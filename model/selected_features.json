@@ -1,0 +1,22 @@
+[
+  "src_port",
+  "fwd_pkt_len_max",
+  "pkt_size_avg",
+  "pkt_len_mean",
+  "pkt_len_min",
+  "pkt_len_max",
+  "fwd_pkt_len_min",
+  "totlen_fwd_pkts",
+  "fwd_pkt_len_mean",
+  "dst_port",
+  "flow_byts_s",
+  "fwd_act_data_pkts",
+  "flow_pkts_s",
+  "tot_fwd_pkts",
+  "fwd_pkts_s",
+  "init_fwd_win_byts",
+  "protocol",
+  "flow_duration",
+  "flow_iat_max",
+  "flow_iat_std"
+]
