@@ -58,4 +58,6 @@ tests/
 
 # Application specific
 data/*
+tests/
+logs/
 *.log
