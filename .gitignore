@@ -59,5 +59,7 @@ tests/
 # Application specific
 data/*
 tests/
+docs/
+model/
 logs/
 *.log
