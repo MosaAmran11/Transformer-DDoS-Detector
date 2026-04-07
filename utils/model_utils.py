@@ -178,9 +178,15 @@ def train_epoch(
         X_batch = X_batch.to(device, non_blocking=True)
         y_batch = y_batch.to(device, non_blocking=True)
 
+        # Support both 1-D integer labels and 2-D one-hot labels
+        if y_batch.dim() == 2:
+            targets = y_batch.argmax(dim=1)
+        else:
+            targets = y_batch.long()
+
         optimizer.zero_grad()
         logits = model(X_batch)
-        loss = criterion(logits, y_batch)
+        loss = criterion(logits, targets)
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
@@ -188,7 +194,6 @@ def train_epoch(
         bs = X_batch.size(0)
         total_loss += loss.item() * bs
         preds = logits.argmax(dim=1)
-        targets = y_batch.argmax(dim=1)
         correct += (preds == targets).sum().item()
         n += bs
 
@@ -220,12 +225,17 @@ def eval_epoch(
         X_batch = X_batch.to(device, non_blocking=True)
         y_batch = y_batch.to(device, non_blocking=True)
 
+        # Support both 1-D integer labels and 2-D one-hot labels
+        if y_batch.dim() == 2:
+            targets = y_batch.argmax(dim=1)
+        else:
+            targets = y_batch.long()
+
         logits = model(X_batch)
-        loss = criterion(logits, y_batch)
+        loss = criterion(logits, targets)
 
         probs = torch.softmax(logits, dim=1)
         preds = logits.argmax(dim=1)
-        targets = y_batch.argmax(dim=1)
 
         bs = X_batch.size(0)
         total_loss += loss.item() * bs
@@ -301,10 +311,10 @@ def train_model(
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=n_epochs)
 
-    # One-hot targets → use KLDivLoss or BCEWithLogitsLoss
-    # We use CrossEntropyLoss with soft targets via manual conversion in forward.
-    # Since labels are one-hot, use BCEWithLogitsLoss per class then sum.
-    criterion = nn.BCEWithLogitsLoss()
+    # CrossEntropyLoss accepts integer class indices (1-D) directly.
+    # train_epoch / eval_epoch convert 2-D one-hot targets to indices before
+    # passing them to the criterion, so this works for both pipelines.
+    criterion = nn.CrossEntropyLoss()
 
     history = {"train_loss": [], "val_loss": [],
                "train_acc": [], "val_acc": []}
