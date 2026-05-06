@@ -5,9 +5,9 @@ Transformer-based classifier for DDoS detection.
 
 Architecture
 ------------
-  Input (batch, seq_len=1, n_features)
+  Input (batch, seq_len, n_features)
       └─> Linear projection → d_model
-      └─> Positional encoding (optional, since seq_len=1)
+      └─> Positional encoding (sinusoidal)
       └─> TransformerEncoder (n_layers × n_heads)
       └─> Global average pooling over seq dimension
       └─> Dropout
@@ -63,12 +63,129 @@ def make_dataloaders(
     return _to_loader(X_train, y_train, True), _to_loader(X_test, y_test, False)
 
 
+def create_sequences(X: np.ndarray, y: np.ndarray, seq_len: int = 10) -> tuple:
+    """Apply a chronological sliding window to the dataset.
+    
+    The target label for the sequence is determined by majority vote.
+    If there is a tie, the label of the last flow in the sequence is used.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Shape (N, n_features)
+    y : np.ndarray
+        Shape (N, n_classes) for one-hot, or (N,) for integer labels.
+    seq_len : int
+        Number of flows per sequence.
+
+    Returns
+    -------
+    X_seq, y_seq : np.ndarray
+        X_seq shape: (N - seq_len + 1, seq_len, n_features)
+        y_seq shape: (N - seq_len + 1, n_classes) or (N - seq_len + 1,)
+    """
+    X_seq = []
+    y_seq = []
+    
+    # If y is one-hot encoded, convert to indices for easier majority voting
+    y_is_onehot = (y.ndim == 2 and y.shape[1] > 1)
+    if y_is_onehot:
+        y_indices = np.argmax(y, axis=1)
+    else:
+        y_indices = y
+
+    for i in range(len(X) - seq_len + 1):
+        X_seq.append(X[i : i + seq_len])
+        
+        # Get labels for this window
+        window_labels = y_indices[i : i + seq_len]
+        
+        # Majority vote
+        values, counts = np.unique(window_labels, return_counts=True)
+        max_count = np.max(counts)
+        majority_labels = values[counts == max_count]
+        
+        if len(majority_labels) == 1:
+            seq_label = majority_labels[0]
+        else:
+            # Tie: take the last flow's label
+            seq_label = window_labels[-1]
+            
+        if y_is_onehot:
+            # Reconstruct one-hot
+            onehot = np.zeros(y.shape[1], dtype=y.dtype)
+            onehot[seq_label] = 1
+            y_seq.append(onehot)
+        else:
+            y_seq.append(seq_label)
+            
+    return np.array(X_seq), np.array(y_seq)
+
+
+# ---------------------------------------------------------------------------
+# Positional encoding  (Vaswani et al., "Attention Is All You Need", 2017)
+# ---------------------------------------------------------------------------
+
+class PositionalEncoding(nn.Module):
+    """Standard sinusoidal positional encoding.
+
+    Injects position information into the embedded token sequence so that
+    the Transformer encoder can distinguish the temporal order of flows.
+    Without this, self-attention is permutation-invariant and cannot learn
+    order-dependent patterns.
+
+    Parameters
+    ----------
+    d_model : int
+        Embedding dimension (must match TransformerEncoder d_model).
+    max_len : int
+        Maximum sequence length the PE table supports.
+    dropout : float
+        Dropout applied after adding the positional signal.
+    """
+
+    def __init__(self, d_model: int, max_len: int = 512, dropout: float = 0.1):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
+        )
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)          # (1, max_len, d_model)  – batch_first
+        self.register_buffer('pe', pe)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Add positional encoding then apply dropout.
+
+        Parameters
+        ----------
+        x : torch.Tensor  shape (batch, seq_len, d_model)
+        """
+        x = x + self.pe[:, :x.size(1)]
+        return self.dropout(x)
+
+
 # ---------------------------------------------------------------------------
 # Transformer model
 # ---------------------------------------------------------------------------
 
 class TransformerClassifier(nn.Module):
     """Transformer encoder for tabular / flow-level DDoS classification.
+
+    Architecture
+    ------------
+      Input (batch, seq_len, n_features)
+          └─> Linear projection → d_model
+          └─> Positional encoding (sinusoidal)
+          └─> TransformerEncoder (n_layers × n_heads)
+          └─> Global average pooling over seq dimension
+          └─> Dropout
+          └─> Linear head → n_classes
+          └─> Softmax (during inference) / log-softmax (during training)
 
     Parameters
     ----------
@@ -109,6 +226,9 @@ class TransformerClassifier(nn.Module):
             nn.LayerNorm(d_model),
         )
 
+        # Positional encoding: inject position information into each token
+        self.pos_encoder = PositionalEncoding(d_model, dropout=dropout)
+
         # Transformer encoder stack
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
@@ -134,20 +254,22 @@ class TransformerClassifier(nn.Module):
 
         Parameters
         ----------
-        x : torch.Tensor  shape (batch, n_features)
+        x : torch.Tensor  shape (batch, seq_len, n_features)
 
         Returns
         -------
         logits : torch.Tensor  shape (batch, n_classes)
         """
-        # Add a sequence-length dimension: (batch, 1, n_features)
-        x = x.unsqueeze(1)
         # Project to d_model
-        x = self.input_proj(x)          # (batch, 1, d_model)
+        x = self.input_proj(x)          # (batch, seq_len, d_model)
+        # Add positional encoding
+        x = self.pos_encoder(x)         # (batch, seq_len, d_model)
         # Transformer
-        x = self.transformer(x)         # (batch, 1, d_model)
-        # Squeeze seq dim
-        x = x.squeeze(1)                # (batch, d_model)
+        x = self.transformer(x)         # (batch, seq_len, d_model)
+        
+        # Aggregate sequence dimension using Global Average Pooling
+        x = x.mean(dim=1)               # (batch, d_model)
+        
         # Classify
         logits = self.classifier(x)     # (batch, n_classes)
         return logits

@@ -274,15 +274,17 @@ class DataStandardizer:
                 f"  Removed duplicates: {rows_after_nan - rows_after_dedup:,} rows removed")
 
             # ------------------------------------------------------------------
-            # 10. Random shrinking to max_rows
+            # 10. Chronological shrinking to max_rows
             # ------------------------------------------------------------------
             rows_after_shrink = rows_after_dedup
             if max_rows is not None and len(df_final) > max_rows:
-                df_final = df_final.sample(
-                    n=max_rows, random_state=random_state)
+                if 'timestamp' in df_final.columns:
+                    df_final = df_final.sort_values('timestamp').head(max_rows)
+                else:
+                    df_final = df_final.head(max_rows)
                 df_final.reset_index(drop=True, inplace=True)
                 rows_after_shrink = len(df_final)
-                print(f"  Randomly sampled to {max_rows:,} rows")
+                print(f"  Sorted chronologically and trimmed to {max_rows:,} rows")
 
             # ------------------------------------------------------------------
             # 11. Save as PKL (same base filename, .pkl extension)

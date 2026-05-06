@@ -76,6 +76,12 @@ class FlowPredictor:
         self.model.eval()
 
         self.class_names: list[str] = list(self.label_encoder.classes_)
+        
+        # Sequence buffer for inference
+        from collections import deque
+        self.seq_len = 10
+        self.buffer = deque(maxlen=self.seq_len)
+        
         print(
             f"[FlowPredictor] Loaded model with {len(self.selected_features)} features "
             f"and {len(self.class_names)} classes on device={self.device}"
@@ -116,14 +122,28 @@ class FlowPredictor:
             f) for f in self.selected_features]
         X_scaled = X_scaled_full[:, feat_indices].astype(np.float32)  # (1, 20)
 
-        # 4. Inference
+        # 4. Append to sequence buffer
+        self.buffer.append(X_scaled[0])
+        
+        if len(self.buffer) < self.seq_len:
+            return {
+                "label": "BUFFERING",
+                "score": 0.0,
+                "is_attack": False,
+                "is_warning": False,
+                "all_scores": {cls: 0.0 for cls in self.class_names},
+                "status": f"{len(self.buffer)}/{self.seq_len}"
+            }
+
+        # 5. Inference
         with torch.no_grad():
+            # Stack buffer into shape (1, seq_len, n_features)
+            X_seq = np.stack(self.buffer)[np.newaxis, ...]
             tensor = torch.tensor(
-                X_scaled, dtype=torch.float32).to(self.device)
+                X_seq, dtype=torch.float32).to(self.device)
             # (1, n_classes)
             logits = self.model(tensor)
-            probs = torch.softmax(logits, dim=1).cpu().numpy()[
-                0]  # (n_classes,)
+            probs = torch.softmax(logits, dim=1).cpu().numpy()[0]  # (n_classes,)
 
         # 5. Decode
         pred_idx = int(np.argmax(probs))
@@ -141,6 +161,7 @@ class FlowPredictor:
             "is_attack": is_attack,
             "is_warning": is_warning,
             "all_scores": all_scores,
+            "status": "ready"
         }
 
     # ------------------------------------------------------------------
